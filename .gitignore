@@ -51,3 +51,7 @@ credentials.json
 client_secret.json
 .aws/
 .gcp/
+
+# Internal project tools and documentation
+docs/GIT_POLICY.md
+app-video-tutorial/
