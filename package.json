@@ -1,6 +1,6 @@
 {
   "name": "cjsoftware-license-checker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Cross-platform application to check licensed software",
   "author": "Charles Jasthyn",
   "repository": "selrahcDC/cjsoftware-license-checker",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
     "better-sqlite3": "^11.0.0",
+    "electron-updater": "^6.8.3",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.300.0",
     "react": "^18.2.0",

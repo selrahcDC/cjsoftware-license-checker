@@ -1,5 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import updater from 'electron-updater'
+const { autoUpdater } = updater
+import path from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 // @ts-ignore
 import icon from '../../resources/icon.png?asset'
@@ -9,20 +11,53 @@ import { promisify } from 'util'
 import fs from 'fs'
 
 const execAsync = promisify(exec)
+const isWin = process.platform === 'win32'
+
+// FIX: Disable Hardware Acceleration for maximum compatibility on older Windows machines
+if (isWin) {
+    app.disableHardwareAcceleration()
+}
+
+// FIX: Global Error Handling to prevent silent exits
+process.on('uncaughtException', (error) => {
+    console.error('CRITICAL ERROR:', error)
+    const { dialog } = require('electron')
+    if (app.isReady()) {
+        dialog.showErrorBox('System Error', `The application encountered a critical error: ${error.message}\n\nPlease try running as Administrator.`)
+    }
+})
 
 let db: any
+let mainWindow: BrowserWindow | null = null
+
+// Auto-updater configuration
+autoUpdater.autoDownload = false
+autoUpdater.logger = console
+
+const sendUpdateMessage = (type: string, data?: any) => {
+    if (mainWindow) {
+        mainWindow.webContents.send('update-message', { type, data })
+    }
+}
+
+autoUpdater.on('checking-for-update', () => sendUpdateMessage('checking'))
+autoUpdater.on('update-available', (info) => sendUpdateMessage('available', info))
+autoUpdater.on('update-not-available', (info) => sendUpdateMessage('not-available', info))
+autoUpdater.on('error', (err) => sendUpdateMessage('error', err.message))
+autoUpdater.on('download-progress', (progressObj) => sendUpdateMessage('downloading', progressObj))
+autoUpdater.on('update-downloaded', (info) => sendUpdateMessage('downloaded', info))
 
 const loadAlternatives = () => {
     try {
         let altPath = ''
         if (app.isPackaged) {
-            altPath = join(process.resourcesPath, 'alternatives.json')
+            altPath = path.join(process.resourcesPath, 'alternatives.json')
         } else {
             // Development path strategies
             const strategies = [
-                join(app.getAppPath(), 'resources/alternatives.json'),
-                join(process.cwd(), 'resources/alternatives.json'),
-                join(__dirname, '../../resources/alternatives.json')
+                path.join(app.getAppPath(), 'resources/alternatives.json'),
+                path.join(process.cwd(), 'resources/alternatives.json'),
+                path.join(__dirname, '../../resources/alternatives.json')
             ]
             altPath = strategies.find(p => fs.existsSync(p)) || strategies[0]
         }
@@ -51,14 +86,14 @@ const getAlternative = (name: string, alternativesMap: any) => {
 }
 
 function createWindow(): void {
-    const mainWindow = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 1100,
         height: 750,
         show: false,
         autoHideMenuBar: true,
         icon: icon,
         webPreferences: {
-            preload: join(__dirname, '../preload/index.mjs'),
+            preload: path.join(__dirname, '../preload/index.mjs'),
             sandbox: false
         }
     })
@@ -75,13 +110,25 @@ function createWindow(): void {
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
         mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     } else {
-        mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+        mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
     }
 }
 
-app.whenReady().then(() => {
+// FIX: Ensure only one instance of the app runs at a time
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+    app.quit()
+} else {
+    app.on('second-instance', () => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore()
+            mainWindow.focus()
+        }
+    })
+
+    app.whenReady().then(() => {
     // Initialize Database
-    const dbPath = join(app.getPath('userData'), 'cj_license_checker.db')
+    const dbPath = path.join(app.getPath('userData'), 'cj_license_checker.db')
     db = new Database(dbPath)
 
     db.exec(`
@@ -158,124 +205,171 @@ app.whenReady().then(() => {
         const commercialKeywords = [
             // Creative & Design
             'adobe', 'photoshop', 'illustrator', 'indesign', 'premiere', 'after effects', 'acrobat pro', 'creative cloud', 'lightroom', 'audition',
-            'autodesk', 'autocad', '3ds max', 'maya', 'revit', 'fusion 360', 'sketch', 'affine', 'capture one', 'affinity photo', 'affinity designer', 'affinity publisher',
-            'corel', 'painter', 'paintshop', 'quarkxpress', 'dxo photolab', 'capture one',
+            'autodesk', 'autocad', '3ds max', 'maya', 'revit', 'fusion 360', 'affinity photo', 'affinity designer', 'affinity publisher', 'capture one',
+            'corel', 'painter', 'paintshop', 'quarkxpress', 'dxo photolab', 'sketch',
             // Development
-            'jetbrains', 'intellij', 'webstorm', 'pycharm', 'phpstorm', 'clion', 'rider', 'datagrip', 'appcode', 'navicat', 'beyond compare', 'sublime text',
+            'jetbrains', 'intellij', 'webstorm', 'pycharm', 'phpstorm', 'clion', 'rider', 'datagrip', 'navicat', 'beyond compare', 'sublime text',
             'tower', 'gitkraken', 'postman enterprise', 'vmware fusion', 'vmware workstation',
             // Office & Productivity
-            'microsoft office', 'microsoft word', 'microsoft excel', 'microsoft powerpoint', 'microsoft outlook', 'ms office', 'visio', 'project',
-            'quickbooks', 'camtasia', 'snagit', 'omnifocus', 'omniffle', 'things', 'fantastical', 'scrivener', 'final cut pro', 'logic pro', 'cleanmymac',
-            'nitro pdf', 'foxit pdf', 'abbyy finereader', 'dragon naturallyspeaking', 'busycal', 'devonthink',
+            'microsoft office', 'microsoft word', 'microsoft excel', 'microsoft powerpoint', 'microsoft outlook', 'ms office', 'visio', 'ms project',
+            'quickbooks', 'camtasia', 'snagit', 'omnifocus', 'omnigraffle', 'fantastical', 'scrivener', 'final cut pro', 'logic pro', 'cleanmymac',
+            'nitro pdf', 'foxit pdf editor', 'abbyy finereader', 'dragon naturallyspeaking', 'busycal', 'devonthink',
+            // Password Managers (paid)
+            '1password',
             // Security & VPN
-            'expressvpn', 'nordvpn', 'mcafee', 'norton', 'kaspersky', 'avg premium', 'avast premium', 'sophos home', 'eset smart security', 'bitdefender total',
+            'expressvpn', 'nordvpn', 'mcafee', 'norton', 'kaspersky', 'avg premium', 'avast premium', 'sophos home premium', 'eset smart security', 'bitdefender total',
             'malwarebytes premium', 'tunnelbear', 'surfshark',
             // Data & Analysis
             'tableau', 'power bi', 'sas', 'spss', 'arcgis', 'matlab', 'wolfram mathematica'
         ]
         const freeKeywords = [
             // Browsers & Communication
-            'google', 'chrome', 'firefox', 'opera', 'vivaldi', 'tor browser', 'arc browser', 'chromium', 'microsoft edge',
+            'google chrome', 'firefox', 'opera', 'vivaldi', 'tor browser', 'arc browser', 'chromium', 'microsoft edge', 'brave',
             'whatsapp', 'telegram', 'signal', 'viber', 'messenger', 'discord', 'slack', 'zoom', 'skype', 'microsoft teams',
             // Development Tools
-            'visual studio code', 'vscode', 'vscodium', 'vs community', 'visual studio community', 'atom', 'sublime text (unregistered)',
+            'visual studio code', 'vscode', 'vscodium', 'vs community', 'visual studio community', 'atom', 'cursor', 'opencode',
             'anaconda', 'python', 'node.js', 'npm', 'git', 'homebrew', 'iterm', 'warp', 'docker', 'postman', 'insomnia', 'bruno',
-            'figma', 'dbeaver', 'db browser', 'fork', 'sourcetree', 'github desktop', 'putty', 'filezilla', 'wireshark', 'cyberduck',
+            'figma', 'dbeaver', 'db browser', 'dbngin', 'fork', 'sourcetree', 'github desktop', 'putty', 'filezilla', 'wireshark', 'cyberduck',
+            'cockpit', 'openmtp', 'herd', 'keka', 'mounty', 'rectangle',
             // Productivity & Cloud
-            'docs', 'sheets', 'slides', 'drive', 'photos', 'calendar', 'meet', 'keep', 'iCloud', 'onedrive', 'dropbox', 'box', 'mega', 'nextcloud',
+            'google docs', 'google sheets', 'google slides', 'google drive', 'icloud', 'onedrive', 'dropbox', 'box', 'mega', 'nextcloud',
             'notion', 'clickup', 'monday.com', 'asana', 'trello', 'evernote', 'todoist', 'joplin', 'obsidian', 'logseq', 'bear', 'craft',
-            'bitwarden', 'keepass', 'lastpass', '1password (free)',
+            'bitwarden', 'keepass', 'lastpass',
+            // Office - free/open source variants
+            'libreoffice', 'wpsoffice', 'onlyoffice', 'keynote', 'numbers', 'pages',
             // Media & Graphics
-            'vlc', 'spotify', 'apple music', 'itunes', 'handbrake', 'iina', 'plex', 'kodi', 'audacity', 'obs studio', 'vnc', 'anydesk', 'teamviewer (free)',
-            'inkscape', 'gimp', 'blender', 'krita', 'darktable', 'rawtherapee', 'davinci resolve', 'canvas', 'framer',
+            'vlc', 'spotify', 'apple music', 'itunes', 'handbrake', 'iina', 'plex', 'kodi', 'audacity', 'obs studio', 'vnc viewer',
+            'inkscape', 'gimp', 'blender', 'krita', 'darktable', 'rawtherapee', 'davinci resolve', 'canva', 'framer',
             // Games & Social
             'steam', 'epic games', 'battle.net', 'origin', 'ubisoft connect', 'gog galaxy', 'roblox', 'minecraft',
-            // Utilities
-            '7-zip', 'winzip (free)', 'winrar (unregistered)', 'notepad++', 'appcleaner', 'transmission', 'qbittorrent', 'grandtotal', 'rectangle', 'spectacle',
-            'malwarebytes', 'avg anti-virus', 'avast free', 'bitdefender free', 'sophos endpoint'
+            // AI & Cloud
+            'claude', 'antigravity', 'ollama', 'openai', 'chatgpt',
+            // Utilities (clearly free)
+            '7-zip', 'notepad++', 'appcleaner', 'transmission', 'qbittorrent', 'spectacle',
+            'malwarebytes free', 'avg free', 'avast free', 'bitdefender free', 'sophos endpoint', 'recuva', 'xampp',
+            'quick share', 'epson', 'hp', 'brother', 'canon', 'gameinput', 'health tools', 'update health',
+            'free download manager', 'freefilesync'
+            // NOTE: anydesk, teamviewer excluded — dual-license (free/paid) → falls through to Third-Party App for manual verification
+            // NOTE: 1password excluded — paid subscription → moved to commercialKeywords
         ]
 
-        const categorize = (name: string, obtainedFrom: string = '', path: string = '') => {
+        const categorize = (name: string, obtainedFrom: string = '', appPath: string = '') => {
+            if (!name) return { type: 'Unknown', licenseRequired: 0, note: 'Missing application name' }
             const lowerName = name.toLowerCase()
-            const lowerPath = path.toLowerCase()
+            // Also match against folder name (e.g. "Google Chrome" from path, vs "Chrome" from plist)
+            const folderName = path.basename(appPath || '', '.app').toLowerCase()
 
-            if (freeKeywords.some(k => lowerName.includes(k))) return { type: 'Freeware/Cloud', licenseRequired: 0, note: 'Standard Free/Open Source' }
-            if (commercialKeywords.some(k => lowerName.includes(k))) return { type: 'Commercial', licenseRequired: 1, note: 'Paid software - requires valid license' }
+            const matchesAny = (keywords: string[]) => keywords.some(k => lowerName.includes(k) || folderName.includes(k))
 
-            // Smarter Utility Detection
-            const utilityKeywords = ['cli', 'tool', 'manager', 'driver', 'runtime', 'update', 'manual', 'help', 'daemon', 'agent', 'service', 'plugin']
-            if (utilityKeywords.some(k => lowerName.includes(k) || lowerPath.includes(k))) {
-                return { type: 'Utility/Helper', licenseRequired: 0, note: 'System Component or Utility' }
+            // Explicit free/open source match
+            if (matchesAny(freeKeywords)) return { type: 'Freeware/Open Source', licenseRequired: 0, note: 'Free or Open Source software' }
+            // Explicit commercial match
+            if (matchesAny(commercialKeywords)) return { type: 'Commercial', licenseRequired: 1, note: 'Paid software - verify active license' }
+
+            // Utility/Helper detection
+            const utilityKeywords = ['cli', 'driver', 'runtime', 'daemon', 'agent', 'service', 'plugin', 'helper', 'installer', 'uninstaller', 'updater', 'notifier', 'shim']
+            if (utilityKeywords.some(k => lowerName.includes(k) || folderName.includes(k))) {
+                return { type: 'Utility/Helper', licenseRequired: 0, note: 'System Utility or Background Service' }
             }
 
-            // Source/Origin Awareness
-            if (obtainedFrom === 'mac_app_store') return { type: 'App Store', licenseRequired: 0, note: 'Verified Mac App Store Application' }
-            if (obtainedFrom === 'apple') return { type: 'Apple System', licenseRequired: 0, note: 'Apple System Application' }
-            if (obtainedFrom === 'identified_developer') return { type: 'Third Party', licenseRequired: 0, note: 'Signed by an Identified Developer' }
-
-            // Common "Setup" or "Updater" apps
-            if (lowerName.includes('installer') || lowerName.includes('uninstaller') || lowerName.includes('updater') || lowerName.includes('notifier')) {
-                return { type: 'Utility', licenseRequired: 0, note: 'Setup/Update Utility' }
-            }
-
-            return { type: 'Software/Other', licenseRequired: 1, note: 'Unrecognized software - manually verify license' }
+            // Fallback: Treat as a neutral third-party app — do NOT flag as action-required
+            // The deep scan (Gatekeeper/codesign) will flag if something is actually wrong
+            return { type: 'Third-Party App', licenseRequired: 0, note: 'Third-party application — verify license if required by your institution' }
         }
 
         const isTrialVersion = (name: string, version: string) => {
-            const trialKeywords = ['trial', 'evaluation', 'demo', 'lite', 'expiring', 'preview', 'beta']
+            // 'beta' and 'preview' removed — these are release channels, not trial versions
+            // (e.g. Chrome Beta, Firefox Preview are fully legitimate)
+            const trialKeywords = ['trial', 'evaluation', 'demo', 'expiring']
             const lowerString = (name + ' ' + version).toLowerCase()
             return trialKeywords.some(k => lowerString.includes(k))
         }
 
-        const performDeepScan = async (name: string, path: string) => {
+        // --- Microsoft Office macOS License Verification ---
+        // Detects the VL Serializer crack: the most common method to crack Office on macOS.
+        // The crack places a fake Volume License at /Library/Preferences/com.microsoft.office.licensingV2.plist
+        // and writes "PerpetualLicenseInfo" into MicrosoftRegistrationDB.
+        const checkOfficeLicenseMac = async (): Promise<{ isLicensed: boolean; note: string }> => {
+            try {
+                const vlPlistPath = '/Library/Preferences/com.microsoft.office.licensingV2.plist'
+                const regDbDir = `${process.env.HOME}/Library/Group Containers/UBF8T346G9.Office/MicrosoftRegistrationDB`
+
+                // Check 1: If the VL plist exists at system level, it was placed by VL Serializer crack
+                const vlPlistExists = fs.existsSync(vlPlistPath)
+
+                // Check 2: Find the MicrosoftRegistrationDB .reg file (filename contains machine-specific ID)
+                let hasPerpetualLicenseInjection = false
+                let hasSubscriptionLicense = false
+                if (fs.existsSync(regDbDir)) {
+                    const regFile = fs.readdirSync(regDbDir).find(f => f.endsWith('.reg'))
+                    const regDbPath = regFile ? path.join(regDbDir, regFile) : null
+                    if (regDbPath && fs.existsSync(regDbPath)) {
+                        try {
+                            const regContent = fs.readFileSync(regDbPath)
+                            const regText = regContent.toString('binary')
+                            // PerpetualLicenseInfo = VL Serializer injected a fake perpetual license
+                            if (regText.includes('PerpetualLicenseInfo')) hasPerpetualLicenseInjection = true
+                            // For a REAL Microsoft 365 subscription, Office stores the signed-in email
+                            // DIRECTLY after 'NextUserLicensingLicensedUserIds' in the binary reg file.
+                            // We look for a valid email pattern in a 100-char window after that marker.
+                            const markerKey = 'NextUserLicensingLicensedUserIds'
+                            const markerIdx = regText.indexOf(markerKey)
+                            if (markerIdx !== -1) {
+                                // Extract the next 100 characters after the marker
+                                const window = regText.substring(markerIdx + markerKey.length, markerIdx + markerKey.length + 100)
+                                // A real email (user@domain.tld) must appear in this window
+                                const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/
+                                if (emailPattern.test(window)) {
+                                    hasSubscriptionLicense = true
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                }
+
+                // Logic:
+                // - Subscription license (email tied) = Legitimate Microsoft 365
+                // - VL plist + PerpetualLicenseInjection (no real subscription) = VL Serializer crack
+                if (hasSubscriptionLicense) {
+                    return { isLicensed: true, note: 'Microsoft 365 subscription license detected.' }
+                }
+                if (vlPlistExists && hasPerpetualLicenseInjection) {
+                    return { isLicensed: false, note: '⚠ Cracked Office detected: VL Serializer license injection found. This is not a legitimate Microsoft license.' }
+                }
+                // No clear evidence either way
+                return { isLicensed: false, note: 'Microsoft Office — no active subscription or license found. Verify with administrator.' }
+            } catch (e) {
+                return { isLicensed: false, note: 'Microsoft Office — could not verify license. Manually confirm.' }
+            }
+        }
+
+        // FIX #5: Pre-compute KMS tool detection ONCE for Windows (not per-app)
+        // This avoids running 5x existsSync checks for every single application in the loop
+        const kmsCrackToolPaths = [
+            'C:\\Program Files\\KMSPico',
+            'C:\\Program Files (x86)\\KMSPico',
+            'C:\\Windows\\KMSAuto',
+            'C:\\Windows\\SECOH-QAD.exe',
+            'C:\\ProgramData\\KMSPico'
+        ]
+        const kmsToolDetected = process.platform === 'win32'
+            ? kmsCrackToolPaths.some(p => fs.existsSync(p))
+            : false
+
+        const performDeepScan = async (name: string, appFilePath: string) => {
             const results: { status: string; note: string } = { status: 'Normal', note: '' }
 
             try {
-                // 1. Check Hosts File for activation blocks
-                const hostsPath = process.platform === 'win32'
-                    ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
-                    : '/etc/hosts'
-
-                if (fs.existsSync(hostsPath)) {
-                    const hosts = fs.readFileSync(hostsPath, 'utf8')
-                    const blockedKeywords = ['adobe', 'microsoft', 'activation', 'v3.su', 'license.internal']
-                    if (blockedKeywords.some(k => hosts.toLowerCase().includes(k) && hosts.includes('127.0.0.1'))) {
-                        return { status: 'FORFEITED', note: '⚠ System hosts modified to block activation servers (Cracked)' }
-                    }
+                // Use pre-computed KMS result (computed once before the loop — much faster)
+                if (process.platform === 'win32' && kmsToolDetected) {
+                    return { status: 'CRACKED', note: '⚠ KMS Activation crack tool found on this system (KMSPico/KMSAuto)' }
                 }
 
-                // 2. Platform Specific deep checks
-                if (process.platform === 'darwin' && path) {
-                    // Check for common macOS crack flags or broken signatures
-                    // Using codesign -v to check integrity
-                    try {
-                        await execAsync(`codesign -v "${path}"`)
-                    } catch (e: any) {
-                        if (e.message.includes('not signed') || e.message.includes('satisfy')) {
-                            return { status: 'INVALID', note: '⚠ App signature is broken/missing (Common in Cracked versions)' }
-                        }
-                    }
-                } else if (process.platform === 'win32') {
-                    // Check for common Windows crack tools (KMSPico, etc) in common locations
-                    const crackPaths = [
-                        'C:\\Program Files\\KMSPico',
-                        'C:\\Windows\\KMSAuto',
-                        'C:\\Windows\\SECOH-QAD.exe'
-                    ]
-                    if (crackPaths.some(p => fs.existsSync(p))) {
-                        return { status: 'CRACKED', note: '⚠ KMS Activation crack discovered on this computer' }
-                    }
-                }
-
-                // 3. Adobe specific "amtlib" check (Legacy but common)
-                if (name.toLowerCase().includes('adobe')) {
-                    const isWin = process.platform === 'win32'
-                    if (isWin && path) {
-                        const amtlib = join(path, 'amtlib.dll')
-                        if (fs.existsSync(amtlib)) {
-                            // This is a simple existence check, but a deep scan would check the DLL signature
-                            results.note = 'Audit: Local licensing file present.'
-                        }
+                // Adobe amtlib.dll check — only for Adobe apps on macOS
+                if (name.toLowerCase().includes('adobe') && appFilePath) {
+                    const amtlib = path.join(appFilePath, 'amtlib.dll')
+                    if (fs.existsSync(amtlib)) {
+                        results.note = 'Audit: Adobe license file present locally — verify activation.'
                     }
                 }
 
@@ -287,75 +381,133 @@ app.whenReady().then(() => {
 
         if (process.platform === 'darwin') {
             try {
-                console.log('Starting macOS application scan (Strict /Applications only)...')
-                const { stdout } = await execAsync('system_profiler -json SPApplicationsDataType')
-                const data = JSON.parse(stdout)
+                console.log('[Main] Starting macOS scan — reading /Applications/ directly...')
+                
+                // FIX #9: Scan both /Applications (system-wide) and ~/Applications (user-level)
+                const systemAppsDir = '/Applications'
+                const userAppsDir = `${process.env.HOME}/Applications`
 
-                const rawApps = data.SPApplicationsDataType || []
-                console.log(`[Main] Total SPApplicationsDataType found: ${rawApps.length}`)
-                const filteredApps = rawApps.filter((appNode: any) => {
-                    const path = appNode.path || ''
-                    // STRICT: Only apps in the main /Applications list, skipping system utilities and Apple's own apps
-                    const isUserApp = path.startsWith('/Applications/') &&
-                        !path.startsWith('/Applications/Utilities/') &&
-                        appNode.obtained_from !== 'apple'
-                    return isUserApp
-                })
+                const readApps = (dir: string) =>
+                    fs.existsSync(dir)
+                        ? fs.readdirSync(dir)
+                            .filter(name => name.endsWith('.app'))
+                            .map(name => path.join(dir, name))
+                        : []
 
-                console.log(`[Main] Filtered to ${filteredApps.length} user-installed apps.`)
-                if (filteredApps.length > 0) {
-                    console.log(`[Main] Sample App Path: ${filteredApps[0].path}`)
+                const appEntries = [
+                    ...readApps(systemAppsDir),
+                    ...readApps(userAppsDir)
+                ]
+
+                console.log(`[Main] Found ${appEntries.length} .app entries in /Applications/ + ~/Applications/`)
+
+                const results = []
+                for (const appPath of appEntries) {
+                    try {
+                        // Read Info.plist to get app name and version
+                        const plistPath = path.join(appPath, 'Contents', 'Info.plist')
+                        // Use folder name as the display name by default — it's always human-readable
+                        // (e.g. "Microsoft Excel" not just "Excel" from CFBundleName)
+                        const folderDisplayName = path.basename(appPath, '.app')
+                        let appName = folderDisplayName
+                        let version = 'Unknown'
+
+                        if (fs.existsSync(plistPath)) {
+                            try {
+                                const { stdout: plistJson } = await execAsync(`plutil -convert json -o - "${plistPath}"`)
+                                const plistData = JSON.parse(plistJson)
+                                // Only use CFBundleName if it's a longer/more descriptive name than the folder
+                                const bundleName = plistData.CFBundleDisplayName || plistData.CFBundleName || ''
+                                if (bundleName.length > folderDisplayName.length) {
+                                    appName = bundleName
+                                }
+                                version = plistData.CFBundleShortVersionString || plistData.CFBundleVersion || 'Unknown'
+                            } catch (e) {
+                                // Fallback to folder name (already set)
+                            }
+                        }
+
+                        const category = categorize(appName, '', appPath)
+                        // Commercial software cannot be auto-verified — always flag for manual review
+                        let complianceStatus = category.type !== 'Commercial'
+                        let complianceNote = category.note
+                        let iconDataUrl = ''
+
+                        // Try to get icon
+                        try {
+                            const icon = await app.getFileIcon(appPath, { size: 'normal' })
+                            iconDataUrl = icon.toDataURL()
+                        } catch (e) {}
+
+                        // PRIMARY CHECK: Gatekeeper assessment (spctl)
+                        // Any app that Gatekeeper rejects is unsigned or tampered — definitive flag
+                        // FIX #1: removed unused 'spctlOut' variable (we only care about exit code)
+                        // FIX #4: track Gatekeeper failure separately so Office check can't overwrite it
+                        let gatekeeperFailed = false
+                        try {
+                            await execAsync(`spctl --assess --type execute "${appPath}" 2>&1`)
+                            // exit 0 = approved by Gatekeeper
+                        } catch (spctlErr: any) {
+                            // Non-zero exit = Gatekeeper issue. Read both stdout and message.
+                            const msg = ((spctlErr.stdout || '') + (spctlErr.message || '')).toLowerCase()
+                            if (msg.includes('rejected') || msg.includes('not signed') || msg.includes('no usable signature')) {
+                                complianceStatus = false
+                                complianceNote = '⚠ Not approved by macOS Gatekeeper — unsigned or tampered'
+                                gatekeeperFailed = true
+                            }
+                            // 'assessment not found' = app not yet assessed, treat as OK
+                        }
+
+                        // SECONDARY CHECK: deep scan (Adobe amtlib etc.)
+                        if (complianceStatus) {
+                            const deepResult = await performDeepScan(appName, appPath)
+                            if (deepResult.status !== 'Normal') {
+                                complianceStatus = false
+                                complianceNote = deepResult.note
+                            } else if (deepResult.note) {
+                                complianceNote = deepResult.note
+                            }
+                        }
+
+                        // SPECIALIZED CHECK: Microsoft Office (macOS VL Serializer crack detection)
+                        // FIX #4: only runs if Gatekeeper did NOT already flag this app;
+                        // Gatekeeper failure is more severe and must not be overwritten
+                        const officeApps = ['microsoft word', 'microsoft excel', 'microsoft powerpoint', 'microsoft outlook', 'microsoft onenote']
+                        const isOfficeApp = officeApps.some(o => appName.toLowerCase().includes(o) || appPath.toLowerCase().includes(o))
+                        if (isOfficeApp && !gatekeeperFailed) {
+                            const officeCheck = await checkOfficeLicenseMac()
+                            complianceStatus = officeCheck.isLicensed
+                            complianceNote = officeCheck.note
+                        }
+
+                        const isTrial = isTrialVersion(appName, version)
+                        const finalComplianceNote = isTrial ? `⚠ Trial/Evaluation version detected.` : complianceNote
+                        const complianceStatusFinal = complianceStatus && !isTrial
+                        const alternative = (!complianceStatusFinal) ? getAlternative(appName, alternativesMap) : null
+
+                        let licenseValidity = 'Permanent'
+                        if (isTrial) licenseValidity = 'Trial Version'
+                        else if (!complianceStatus) licenseValidity = 'Action Required'
+                        else if (category.type === 'Commercial') licenseValidity = 'Verify License'
+
+                        results.push({
+                            name: appName,
+                            version,
+                            type: category.type,
+                            license_required: category.licenseRequired,
+                            is_licensed: complianceStatusFinal,
+                            compliance_note: finalComplianceNote,
+                            license_validity: licenseValidity,
+                            alternative,
+                            icon: iconDataUrl,
+                            path: appPath
+                        })
+                    } catch (appErr) {
+                        console.error(`[Main] Failed to process ${appPath}:`, appErr)
+                    }
                 }
 
-                const results = await Promise.all(filteredApps.map(async (appNode: any) => {
-                    const category = categorize(appNode._name, appNode.obtained_from, appNode.path)
-                    let complianceStatus = category.licenseRequired === 0
-                    let complianceNote = category.note
-                    let iconDataUrl = ''
-
-                    // Try to get icon
-                    if (appNode.path) {
-                        try {
-                            const icon = await app.getFileIcon(appNode.path, { size: 'normal' })
-                            const dataUrl = icon.toDataURL()
-                            if (dataUrl.length > 100) { // Check if it's not a generic blank icon
-                                iconDataUrl = dataUrl
-                            } else {
-                                console.warn(`[Main] Icon for ${appNode._name} seems empty/invalid. Path: ${appNode.path}`)
-                            }
-                        } catch (e) {
-                            console.error(`[Main] Failed getFileIcon for ${appNode._name}: ${e instanceof Error ? e.message : String(e)}`)
-                        }
-                    }
-
-                    // Perform Deep Scan for all software except explicit Freeware/Cloud
-                    if (category.type !== 'Freeware/Cloud') {
-                        const deepResult = await performDeepScan(appNode._name, appNode.path)
-                        if (deepResult.status !== 'Normal') {
-                            complianceStatus = false
-                            complianceNote = deepResult.note
-                        }
-                    }
-
-                    const isTrial = isTrialVersion(appNode._name, appNode.version || '')
-                    let finalComplianceNote = isTrial ? `⚠ Trial/Evaluation version detected.` : complianceNote
-                    const complianceStatusFinal = complianceStatus && !isTrial
-
-                    const alternative = (!complianceStatusFinal) ? getAlternative(appNode._name, alternativesMap) : null
-
-                    return {
-                        name: appNode._name,
-                        version: appNode.version || 'Unknown',
-                        type: category.type,
-                        license_required: category.licenseRequired,
-                        is_licensed: complianceStatusFinal,
-                        compliance_note: finalComplianceNote,
-                        license_validity: isTrial ? 'Trial Version' : (complianceStatus ? 'Permanent' : 'Action Required'),
-                        alternative: alternative,
-                        icon: iconDataUrl,
-                        path: appNode.path
-                    }
-                }))
+                console.log(`[Main] macOS scan complete. Returning ${results.length} items.`)
                 return results
             } catch (err) {
                 console.error('macOS Scan failed:', err)
@@ -370,12 +522,26 @@ app.whenReady().then(() => {
                     'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
                 ]
 
-                // Pure "Add/Remove Programs" filter
-                const cmd = `powershell "Get-ItemProperty ${paths.join(', ')} -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null -and $_.SystemComponent -ne 1 -and $_.UninstallString -ne $null -and $_.DisplayName -notmatch '^Update for' -and $_.DisplayName -notmatch 'Redistributable' } | Select-Object DisplayName, DisplayVersion | ConvertTo-Json"`
-                const { stdout } = await execAsync(cmd)
-                if (!stdout) return []
-                const data = JSON.parse(stdout)
-                const rawApps = Array.isArray(data) ? data : [data]
+                // Fetch Publisher field too for better categorization
+                const cmd = `powershell "Get-ItemProperty ${paths.join(', ')} -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null -and $_.SystemComponent -ne 1 -and $_.UninstallString -ne $null -and $_.DisplayName -notmatch '^Update for' -and $_.DisplayName -notmatch 'Redistributable' } | Select-Object DisplayName, DisplayVersion, Publisher | ConvertTo-Json"`
+                const { stdout, stderr } = await execAsync(cmd)
+                
+                if (stderr) console.warn('[Main] Windows Scan Stderr:', stderr)
+                if (!stdout || stdout.trim() === '') {
+                    console.log('[Main] No applications found via PowerShell Registry check.')
+                    return []
+                }
+
+                let data;
+                try {
+                    data = JSON.parse(stdout)
+                } catch (pe) {
+                    console.error('[Main] JSON Parse Failure. Raw PS Output:', stdout.substring(0, 500))
+                    return []
+                }
+
+                const rawApps = Array.isArray(data) ? data : (data ? [data] : [])
+                console.log(`[Main] Processed ${rawApps.length} programs from Registry.`)
 
                 const appMap = new Map()
                 rawApps.forEach((app: any) => {
@@ -384,38 +550,42 @@ app.whenReady().then(() => {
                 })
 
                 const uniqueApps = Array.from(appMap.values())
-                console.log(`Scan finished. Found ${uniqueApps.length} unique user programs.`)
+                console.log(`Scan finished. Found ${uniqueApps.length} programs in Registry. Processing results...`)
 
                 const finalResults = await Promise.all(uniqueApps.map(async (app: any) => {
-                    const category = categorize(app.DisplayName, '', '')
-                    let complianceStatus = category.licenseRequired === 0
+                    const appName = app.DisplayName || 'Unknown Program'
+                    const category = categorize(appName, '', '')
+                    // Commercial apps always need manual license verification
+                    let complianceStatus = category.type !== 'Commercial'
                     let complianceNote = category.note
 
-                    // Perform Deep Scan for all software except explicit Freeware/Cloud
-                    if (category.type !== 'Freeware/Cloud') {
-                        const deepResult = await performDeepScan(app.DisplayName, '')
-                        if (deepResult.status !== 'Normal') {
-                            complianceStatus = false
-                            complianceNote = deepResult.note
-                        }
+                    // Deep scan: KMS crack tool detection
+                    const deepResult = await performDeepScan(appName, '')
+                    if (deepResult.status !== 'Normal') {
+                        complianceStatus = false
+                        complianceNote = deepResult.note
                     }
 
-                    const isTrial = isTrialVersion(app.DisplayName, app.DisplayVersion || '')
-                    let finalComplianceNote = isTrial ? `⚠ Trial/Evaluation program detected.` : complianceNote
+                    const isTrial = isTrialVersion(appName, app.DisplayVersion || '')
+                    const finalComplianceNote = isTrial ? `⚠ Trial/Evaluation program detected.` : complianceNote
                     const complianceStatusFinal = complianceStatus && !isTrial
+                    const alternative = (!complianceStatusFinal) ? getAlternative(appName, alternativesMap) : null
 
-                    const alternative = (!complianceStatusFinal) ? getAlternative(app.DisplayName, alternativesMap) : null
+                    let licenseValidity = 'Licensed/OK'
+                    if (isTrial) licenseValidity = 'Trial/Evaluation'
+                    else if (!complianceStatus) licenseValidity = 'Action Required'
+                    else if (category.type === 'Commercial') licenseValidity = 'Verify License'
 
                     return {
-                        name: app.DisplayName,
+                        name: appName,
                         version: app.DisplayVersion || 'Unknown',
                         type: category.type,
                         license_required: category.licenseRequired,
                         is_licensed: complianceStatusFinal,
                         compliance_note: finalComplianceNote,
-                        license_validity: isTrial ? 'Trial/Evaluation' : (complianceStatus ? 'Permanent/Licensed' : 'Action Required'),
-                        alternative: alternative,
-                        icon: '', // TODO: Implement Windows icon fetching if possible
+                        license_validity: licenseValidity,
+                        alternative,
+                        icon: '',
                         path: ''
                     }
                 }))
@@ -448,49 +618,87 @@ app.whenReady().then(() => {
                 // 2. Check Activation Status via slmgr
                 try {
                     const { stdout: slmgr } = await execAsync('cscript //nologo %systemroot%\\system32\\slmgr.vbs /dli')
-                    if (slmgr.toLowerCase().includes('kms') || slmgr.toLowerCase().includes('volume')) {
-                        // Check if it's a known crack tool generating this KMS
+                    const slmgrLower = slmgr.toLowerCase()
+                    if (slmgrLower.includes('kms') || slmgrLower.includes('volume')) {
+                        // KMS activation found — check if it's from a crack tool or a legitimate enterprise KMS
                         const crackPaths = [
                             'C:\\Program Files\\KMSPico',
+                            'C:\\Program Files (x86)\\KMSPico',
                             'C:\\Windows\\KMSAuto',
                             'C:\\Windows\\v3.su',
-                            'C:\\Windows\\SECOH-QAD.exe'
+                            'C:\\Windows\\SECOH-QAD.exe',
+                            'C:\\ProgramData\\KMSPico'
                         ]
                         if (crackPaths.some(p => fs.existsSync(p))) {
                             result.status = 'CRACKED'
-                            result.note = '⚠ OS Activation handled by an unauthorized KMS Tool (Crack detected).'
+                            result.note = '⚠ OS Activation is handled by an unauthorized KMS Tool (Crack detected).'
                         } else {
-                            result.note = 'Information: System uses Volume/KMS Activation (Standard for Enterprises).'
+                            result.note = 'Information: Windows uses Volume/KMS Activation (Standard for Enterprises/Schools).'
                         }
-                    } else if (slmgr.toLowerCase().includes('unlicensed') || slmgr.toLowerCase().includes('notification')) {
+                    } else if (slmgrLower.includes('unlicensed') || slmgrLower.includes('notification')) {
                         result.status = 'UNLICENSED'
-                        result.note = '⚠ Windows is not activated or in notification mode.'
+                        result.note = '⚠ Windows is not activated or running in notification mode.'
                     }
                 } catch (e) {
                     console.error('slmgr check failed', e)
                 }
 
-                // 3. Deep Check for OS Expiration (/xpr)
+                // 3. Check license expiration via slmgr /xpr
                 try {
                     const { stdout: xpr } = await execAsync('cscript //nologo %systemroot%\\system32\\slmgr.vbs /xpr')
                     if (xpr.includes('will expire')) {
                         result.status = 'EXPIRING'
                         const dateMatch = xpr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/)
-                        result.note = `⚠ Windows license is temporary. Expiration: ${dateMatch ? dateMatch[0] : 'See slmgr output'}.`
-                    } else if (xpr.includes('permanently activated')) {
+                        result.note = `⚠ Windows license is temporary and will expire: ${dateMatch ? dateMatch[0] : 'Check slmgr output'}.`
+                    } else if (xpr.toLowerCase().includes('permanently activated')) {
                         result.note = 'Information: Windows is permanently activated.'
                     }
                 } catch (e) { }
 
-                // 4. Check for illegal activators in system
-                const illegalServices = ['KMSeldi', 'Service_KMS', 'KMSAuto']
+                // 4. Check for unauthorized KMS services running in background
                 try {
-                    const { stdout: services } = await execAsync('powershell "Get-Service | Where-Object { $_.Name -match \'KMS\' -or $_.DisplayName -match \'KMS\' } | Select-Object Name | ConvertTo-Json"')
-                    if (services && services.length > 5) {
-                        result.status = 'CRACKED'
-                        result.note = '⚠ Unauthorized Activation Service running in background (Crack detected).'
+                    const { stdout: services } = await execAsync('powershell "Get-Service | Where-Object { $_.Name -match \'KMS\' -or $_.DisplayName -match \'KMS\' } | Select-Object Name, DisplayName | ConvertTo-Json"')
+                    if (services && services.trim() !== '' && services.trim() !== 'null') {
+                        try {
+                            const parsedServices = JSON.parse(services)
+                            const serviceList = Array.isArray(parsedServices) ? parsedServices : [parsedServices]
+                            if (serviceList.length > 0 && serviceList.some((s: any) => s.Name)) {
+                                result.status = 'CRACKED'
+                                result.note = `⚠ Unauthorized KMS Activation Service found: "${serviceList[0]?.Name}" (Crack tool running in background).`
+                            }
+                        } catch (pe) { /* JSON parse failed — no services found */ }
                     }
                 } catch (e) { }
+
+                // 5. Microsoft Office License Check (Windows) via ospp.vbs
+                // ospp.vbs is Microsoft's official Office licensing diagnostic tool
+                const officePaths = [
+                    'C:\\Program Files\\Microsoft Office\\Office16\\ospp.vbs',
+                    'C:\\Program Files (x86)\\Microsoft Office\\Office16\\ospp.vbs',
+                    'C:\\Program Files\\Microsoft Office\\root\\Office16\\ospp.vbs'
+                ]
+                const osppPath = officePaths.find(p => fs.existsSync(p))
+                if (osppPath) {
+                    try {
+                        const { stdout: osppOut } = await execAsync(`cscript //nologo "${osppPath}" /dstatus`)
+                        const osppLower = osppOut.toLowerCase()
+                        // If Office shows KMS activation AND crack tools also exist → cracked
+                        const officeKmsActive = osppLower.includes('volume_kmsclient') || osppLower.includes('kms')
+                        const officeCrackPresent = [
+                            'C:\\Program Files\\KMSPico',
+                            'C:\\Program Files (x86)\\KMSPico',
+                            'C:\\Windows\\KMSAuto',
+                            'C:\\Windows\\SECOH-QAD.exe'
+                        ].some(p => fs.existsSync(p))
+                        if (officeKmsActive && officeCrackPresent) {
+                            result.note += ' | ⚠ Microsoft Office is KMS-activated via an unauthorized crack tool.'
+                        } else if (osppLower.includes('licensed')) {
+                            result.note += ' | ✓ Microsoft Office appears legitimately licensed.'
+                        } else if (osppLower.includes('unlicensed') || osppLower.includes('notification mode')) {
+                            result.note += ' | ⚠ Microsoft Office is NOT activated.'
+                        }
+                    } catch (e) { /* ospp.vbs not accessible */ }
+                }
 
             } else if (process.platform === 'darwin') {
                 const { stdout } = await execAsync('system_profiler SPSoftwareDataType -json')
@@ -589,12 +797,31 @@ app.whenReady().then(() => {
         return true
     })
 
+    // Auto-update IPC
+    ipcMain.handle('check-for-updates', () => {
+        autoUpdater.checkForUpdatesAndNotify()
+    })
+
+    ipcMain.handle('start-download', () => {
+        autoUpdater.downloadUpdate()
+    })
+
+    ipcMain.handle('quit-and-install', () => {
+        autoUpdater.quitAndInstall()
+    })
+
     createWindow()
+
+    // Check for updates on startup
+    if (app.isPackaged) {
+        autoUpdater.checkForUpdatesAndNotify()
+    }
 
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
-})
+    })
+}
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {

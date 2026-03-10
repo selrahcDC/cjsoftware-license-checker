@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { LayoutDashboard, Monitor, PlusCircle, Search, Save, Trash2, CheckCircle, ShieldCheck, XCircle, AlertCircle, RefreshCw, Smartphone, Download, ChevronUp, ChevronDown, ArrowUpAZ, History, List, Package, HelpCircle, BookOpen, ChevronRight, MonitorPlay, ArrowRight, Sun, Moon } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import UpdateNotifier from './components/UpdateNotifier'
 
 interface Device {
     id?: number
@@ -38,6 +39,10 @@ export default function App() {
     const [sortConfig, setSortConfig] = useState<{ key: keyof Software; direction: 'asc' | 'desc' } | null>({ key: 'is_licensed', direction: 'asc' })
     const [theme, setTheme] = useState(localStorage.getItem('cj_license_checker_theme') || 'dark')
 
+    // Auto-updater state
+    const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error' | 'not-available'>('idle')
+    const [updateInfo, setUpdateInfo] = useState<{ version?: string; percent?: number; error?: string } | null>(null)
+
     // Form state
     const [formData, setFormData] = useState({
         assetTag: '',
@@ -49,11 +54,38 @@ export default function App() {
     useEffect(() => {
         loadLastDevice()
         // Initial OS status check on mount
-        window.electron.ipcRenderer.invoke('check-os-status').then(setOsStatus).catch(console.error)
+        if ((window as any).electron?.ipcRenderer) {
+            window.electron.ipcRenderer.invoke('check-os-status').then(setOsStatus).catch(console.error)
+        }
 
         const seenOnboarding = localStorage.getItem('cj_license_checker_onboarded')
         if (!seenOnboarding) {
             setShowOnboarding(true)
+        }
+
+        // Register the auto-updater message listener
+        // The preload exposes onUpdateMessage which bridges the main process IPC to the renderer
+        if ((window as any).electron?.ipcRenderer?.onUpdateMessage) {
+            const unsubscribe = window.electron.ipcRenderer.onUpdateMessage((msg: any) => {
+                switch (msg.type) {
+                    case 'checking':     setUpdateStatus('checking'); break
+                    case 'available':
+                        setUpdateStatus('available')
+                        setUpdateInfo({ version: msg.data?.version })
+                        // macOS: in-app download requires code signing, which we don't have.
+                        // Instead, open the GitHub Releases page directly so the user can
+                        // manually download the new DMG — no extra clicks needed.
+                        if ((window as any).electron?.process?.platform === 'darwin') {
+                            window.open('https://github.com/selrahcDC/cjsoftware-license-checker/releases', '_blank')
+                        }
+                        break
+                    case 'not-available': setUpdateStatus('not-available'); break
+                    case 'downloading':  setUpdateStatus('downloading'); setUpdateInfo(prev => ({ ...prev, percent: Math.round(msg.data?.percent || 0) })); break
+                    case 'downloaded':   setUpdateStatus('downloaded'); setUpdateInfo(prev => ({ ...prev, version: msg.data?.version })); break
+                    case 'error':        setUpdateStatus('error'); setUpdateInfo({ error: msg.data }); break
+                }
+            })
+            return unsubscribe
         }
     }, [])
 
@@ -74,6 +106,7 @@ export default function App() {
     }, [onboardingStep]);
 
     const loadLastDevice = async () => {
+        if (!(window as any).electron?.ipcRenderer) return
         const data = await window.electron.ipcRenderer.invoke('get-devices')
         setDevices(data)
         if (data.length > 0) {
@@ -94,35 +127,54 @@ export default function App() {
             alert('Please fill in Asset Tag and Assigned User first.')
             return
         }
-        setSoftware([]) // Clear existing results to show feedback
-        setOsStatus(null)
         setIsScanning(true)
-        try {
-            // Run core scans
-            const [results, osInfo] = await Promise.all([
-                window.electron.ipcRenderer.invoke('scan-software'),
-                window.electron.ipcRenderer.invoke('check-os-status')
-            ])
-            setSoftware(results)
-            console.log('Software Scan Finished Found:', results.length, 'apps. Data:', results)
-            setOsStatus(osInfo)
+        setSoftware([])
+        setOsStatus(null)
 
-            // Optional Office scan (Windows only)
-            // Use a safer check for platform in case preload hasn't updated yet
-            const isWin = (window as any).electron.process?.platform === 'win32' || navigator.userAgent.includes('Windows')
-            if (isWin) {
-                try {
-                    const officeInfo = await window.electron.ipcRenderer.invoke('check-office-license')
-                    setOfficeStatus(officeInfo)
-                } catch (e) {
-                    console.warn('Office license check skipped or failed:', e)
-                }
-            } else {
-                setOfficeStatus(null)
+        try {
+            // Check for Electron availability
+            if (!(window as any).electron?.ipcRenderer) {
+                alert('Simulation: Scanning logic not available in browser.')
+                setIsScanning(false)
+                return
             }
+
+            // Acknowledge scanning start with a small delay for UI feedback
+            await new Promise(r => setTimeout(r, 100))
+
+            // Run Software Scan (Main Priority)
+            console.log('[App] Initiating software inventory scan...')
+            try {
+                const results = await window.electron.ipcRenderer.invoke('scan-software')
+                const softwareResults = Array.isArray(results) ? results : []
+                setSoftware(softwareResults)
+                console.log(`[App] Software scan finished. Found ${softwareResults.length} items.`)
+            } catch (scanErr) {
+                console.error('[App] Software scan failed:', scanErr)
+                alert('Software scan failed. Please check app permissions.')
+                setSoftware([])
+            }
+
+            // Run System Status Checks in parallel (Non-blocking fallback)
+            console.log('[App] Checking system security status...')
+            Promise.all([
+                window.electron.ipcRenderer.invoke('check-os-status').catch(e => {
+                    console.warn('OS status check failed:', e)
+                    return { status: 'ERROR', note: 'Failed to access OS status' }
+                }),
+                window.electron.ipcRenderer.invoke('check-office-license').catch(e => {
+                    console.warn('Office license check failed:', e)
+                    return null
+                })
+            ]).then(([osInfo, officeInfo]) => {
+                setOsStatus(osInfo)
+                const isWin = (window as any).electron.process?.platform === 'win32' || navigator.userAgent.includes('Windows')
+                if (isWin) setOfficeStatus(officeInfo)
+            })
+
         } catch (e) {
-            console.error('Scan error:', e)
-            alert('Scan failed. Please try again.')
+            console.error('Critical scan error:', e)
+            alert('A critical error occurred during scanning.')
         } finally {
             setIsScanning(false)
         }
@@ -137,6 +189,11 @@ export default function App() {
 
         setIsSaving(true)
         try {
+            if (!(window as any).electron?.ipcRenderer) {
+                alert('Simulation: Saving not available in browser.')
+                setIsSaving(false)
+                return
+            }
             const deviceId = await window.electron.ipcRenderer.invoke('save-device', formData)
             const formattedSoftware = software.map(sw => ({
                 name: sw.name,
@@ -160,7 +217,9 @@ export default function App() {
     const handleDeleteDevice = async (id: number) => {
         if (!confirm('Are you sure you want to delete this audit record? This cannot be undone.')) return
         try {
-            await window.electron.ipcRenderer.invoke('delete-device', id)
+            if ((window as any).electron?.ipcRenderer) {
+                await window.electron.ipcRenderer.invoke('delete-device', id)
+            }
             loadLastDevice()
         } catch (e) {
             alert('Failed to delete audit.')
@@ -182,7 +241,25 @@ export default function App() {
 
         // FLAT FILE FORMAT: Perfect for importing into centralized dashboards (Excel, PowerBI, SQL)
         // Every software row contains the computer/user context for easy aggregation.
-        const headers = ["Scan_ID", "Audit_Date", "Institution", "Asset_Tag", "Assigned_User", "Location", "Brand_Model", "OS_Status", "Software_Name", "Software_Version", "Software_Type", "Compliance_Status", "License_Validity"];
+        const headers = [
+            "Scan_ID",
+            "Audit_Date",
+            "Institution",
+            "Asset_Tag",
+            "Assigned_User",
+            "Location",
+            "Brand_Model",
+            "OS_Status",
+            "Software_Name",
+            "Software_Version",
+            "Software_Type",
+            "License_Required",
+            "Compliance_Status",
+            "License_Validity",
+            "Compliance_Note",
+            "Recommended_Alternative",
+            "Alternative_URL"
+        ];
 
         const scanId = `SCAN-${formData.assetTag || 'NA'}-${Date.now()}`;
         const auditDate = new Date().toISOString();
@@ -194,20 +271,26 @@ export default function App() {
             return a.is_licensed ? 1 : -1;
         });
 
+        const esc = (val: string | null | undefined) => `"${(val || '').replace(/"/g, '""')}"`;
+
         const csvRows = sortedForExport.map(s => [
-            `"${scanId}"`,
-            `"${auditDate}"`,
-            `"${institution}"`,
-            `"${(formData.assetTag || "").replace(/"/g, '""')}"`,
-            `"${(formData.assignedUser || "").replace(/"/g, '""')}"`,
-            `"${(formData.location || "").replace(/"/g, '""')}"`,
-            `"${(formData.brandModel || "").replace(/"/g, '""')}"`,
-            `"${osStatus?.status || 'UNKNOWN'}"`,
-            `"${s.name.replace(/"/g, '""')}"`,
-            `"${s.version.replace(/"/g, '""')}"`,
-            `"${s.type}"`,
-            `"${s.is_licensed ? 'COMPLIANT' : 'ACTION REQUIRED'}"`,
-            `"${(s.license_validity || 'Verification Required').replace(/"/g, '""')}"`
+            esc(scanId),
+            esc(auditDate),
+            esc(institution),
+            esc(formData.assetTag),
+            esc(formData.assignedUser),
+            esc(formData.location),
+            esc(formData.brandModel),
+            esc(osStatus?.status || 'UNKNOWN'),
+            esc(s.name),
+            esc(s.version),
+            esc(s.type),
+            esc(s.license_required ? 'YES' : 'NO'),
+            esc(s.is_licensed ? 'COMPLIANT' : 'ACTION REQUIRED'),
+            esc(s.license_validity || 'Verification Required'),
+            esc(s.compliance_note || ''),
+            esc(s.alternative?.name || ''),
+            esc(s.alternative?.url || '')
         ]);
 
         const csvContent = [headers.join(','), ...csvRows.map(row => row.join(','))].join('\n');
@@ -221,7 +304,7 @@ export default function App() {
             new Date().toISOString().split('T')[0]
         ].filter(Boolean).join('-');
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -283,21 +366,21 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <h1 style={{ margin: 0, fontSize: '1.5rem', lineHeight: 1.1 }}>CJSoftware License Checker</h1>
-                            <span
-                                onClick={() => setIsChangelogOpen(true)}
-                                style={{
-                                    fontSize: '0.6rem',
-                                    background: 'var(--primary)',
-                                    padding: '0.1rem 0.4rem',
-                                    borderRadius: '4px',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    letterSpacing: '0.05em'
-                                }}
-                            >
-                                V0.2.0
-                            </span>
+                            <h1 style={{ margin: 0, fontSize: '1.6rem', lineHeight: 1.1, letterSpacing: '-0.03em' }}>CJSoftware License Checker</h1>
+                                <span
+                                    onClick={() => setIsChangelogOpen(true)}
+                                    style={{
+                                        fontSize: '0.6rem',
+                                        background: 'var(--primary)',
+                                        padding: '0.1rem 0.4rem',
+                                        borderRadius: '4px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        letterSpacing: '0.05em'
+                                    }}
+                                >
+                                    V1.1.0
+                                </span>
                         </div>
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                             Created by: Charles Jasthyn C. De La Cueva
@@ -320,6 +403,20 @@ export default function App() {
                         <HelpCircle size={14} /> Help Guide
                     </button>
                     <button
+                        onClick={() => {
+                            if ((window as any).electron?.ipcRenderer) {
+                                window.electron.ipcRenderer.invoke('check-for-updates')
+                            } else {
+                                window.postMessage({ type: 'simulate-update-message', data: { type: 'available', data: { version: '1.2.5' } } }, '*')
+                            }
+                        }}
+                        className="secondary"
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.7rem', borderRadius: '6px' }}
+                        title="Manual update check"
+                    >
+                        <RefreshCw size={14} /> Check for Updates
+                    </button>
+                    <button
                         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                         className="secondary"
                         style={{ padding: '0.4rem 0.6rem', borderRadius: '6px' }}
@@ -334,6 +431,60 @@ export default function App() {
                     )}
                 </div>
             </motion.header>
+
+            {/* ─── Auto-Updater Banner ─── */}
+            {updateStatus !== 'idle' && (
+                <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '0.5rem 1.25rem',
+                    background: updateStatus === 'downloaded' ? 'rgba(16,185,129,0.15)' :
+                                updateStatus === 'error'      ? 'rgba(239,68,68,0.15)' :
+                                                               'rgba(99,102,241,0.12)',
+                    borderBottom: `1px solid ${
+                        updateStatus === 'downloaded' ? 'rgba(16,185,129,0.3)' :
+                        updateStatus === 'error'      ? 'rgba(239,68,68,0.3)' :
+                        'rgba(99,102,241,0.3)'
+                    }`,
+                    fontSize: '0.78rem', gap: '0.75rem'
+                }}>
+                    <span style={{ color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        {updateStatus === 'checking'     && <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Checking for updates...</>}
+                        {updateStatus === 'not-available'&& <>✓ You are on the latest version.</>}
+                        {updateStatus === 'available'    && <>🔔 Update v{updateInfo?.version} is available. Ready to download.</>}
+                        {updateStatus === 'downloading'  && <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Downloading update... {updateInfo?.percent ?? 0}%</>}
+                        {updateStatus === 'downloaded'   && <>✅ Update v{updateInfo?.version} downloaded. Restart to apply.</>}
+                        {updateStatus === 'error'        && <>⚠️ Update error: {updateInfo?.error || 'Unknown error'}</>}
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+                        {updateStatus === 'available' && (
+                            <button
+                                className="btn-primary"
+                                style={{ padding: '0.25rem 0.8rem', fontSize: '0.72rem' }}
+                                onClick={() => window.electron.ipcRenderer.invoke('start-download')}
+                            >Download</button>
+                        )}
+                        {updateStatus === 'downloaded' && (
+                            <button
+                                className="btn-primary"
+                                style={{ padding: '0.25rem 0.8rem', fontSize: '0.72rem', background: 'var(--success)' }}
+                                onClick={() => window.electron.ipcRenderer.invoke('quit-and-install')}
+                            >Install &amp; Restart</button>
+                        )}
+                        {(updateStatus === 'available' || updateStatus === 'downloaded' || updateStatus === 'error') && (
+                            <button
+                                style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '4px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.72rem', padding: '0.25rem 0.6rem' }}
+                                onClick={() => window.open('https://github.com/selrahcDC/cjsoftware-license-checker/releases', '_blank')}
+                                title="Open GitHub Releases page in browser"
+                            >🔗 GitHub Releases</button>
+                        )}
+                        <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1, padding: '0 0.2rem' }}
+                            onClick={() => setUpdateStatus('idle')}
+                            title="Dismiss"
+                        >✕</button>
+                    </div>
+                </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
                 {/* Left Column: Input & Actions */}
@@ -609,8 +760,11 @@ export default function App() {
                                             </div>
                                         </td>
                                         <td style={{ padding: '0.8rem 0.6rem', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
-                                            <span className={`badge ${sw.is_licensed ? 'badge-success' : 'badge-error'}`} style={{ fontSize: '0.65rem', padding: '0.3rem 0.6rem', fontWeight: 700 }}>
-                                                {sw.is_licensed ? '✓ OK' : '⚠️ Action Req.'}
+                                            <span
+                                                className={`badge ${sw.is_licensed && sw.type !== 'Third-Party App' ? 'badge-success' : sw.is_licensed ? 'badge-warning' : 'badge-error'}`}
+                                                style={{ fontSize: '0.65rem', padding: '0.3rem 0.6rem', fontWeight: 700 }}
+                                            >
+                                                {!sw.is_licensed ? '⚠️ Action Req.' : sw.type === 'Third-Party App' ? '◎ Verify' : '✓ OK'}
                                             </span>
                                         </td>
                                         <td style={{ padding: '0.8rem 0.6rem', verticalAlign: 'top', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -718,15 +872,33 @@ export default function App() {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                                 <section>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                        <span style={{ background: 'var(--primary)', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700 }}>v0.2.0</span>
-                                        <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>Current Release</span>
+                                        <span style={{ background: 'var(--primary)', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700 }}>v1.1.0</span>
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>Office Crack Detection & Scan Hardening</span>
                                     </div>
                                     <ul style={{ paddingLeft: '1.25rem', fontSize: '0.8rem', color: 'var(--text-main)', lineHeight: '1.6' }}>
+                                        <li><strong>Office Crack Detection (macOS)</strong>: Detects VL Serializer license injection — the most common macOS Office crack.</li>
+                                        <li><strong>Microsoft 365 License Verification</strong>: Distinguishes a real M365 subscription from cracked activation.</li>
+                                        <li><strong>Windows Office Check</strong>: Uses <code>ospp.vbs</code> to verify Office activation status on Windows.</li>
+                                        <li><strong>Windows Hardening</strong>: KMS service detection now correctly parses JSON; expanded crack tool paths.</li>
+                                        <li><strong>Scan Coverage</strong>: Now also scans <code>~/Applications/</code> for user-level macOS app installs.</li>
+                                        <li><strong>CSV Export Upgraded</strong>: Added <em>Compliance_Note</em>, <em>License_Required</em>, <em>Recommended_Alternative</em>, and <em>Alternative_URL</em> columns. UTF-8 BOM added for Excel compatibility.</li>
+                                        <li><strong>14 Bug Fixes</strong>: Fixed false positives (AnyDesk, TeamViewer, Chrome Beta), duplicate keywords, trailing-space keyword bugs, and Gatekeeper/Office check priority.</li>
+                                        <li><strong>UI</strong>: Third-Party Apps now show a neutral <em>&#9678; Verify</em> badge instead of a misleading green ✓ OK.</li>
+                                    </ul>
+                                </section>
+
+                                <section>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                        <span style={{ background: 'var(--glass)', border: '1px solid var(--border)', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.7rem' }}>v1.0.0</span>
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>Initial Official Release</span>
+                                    </div>
+                                    <ul style={{ paddingLeft: '1.25rem', fontSize: '0.8rem', color: 'var(--text-main)', lineHeight: '1.6' }}>
+                                        <li><strong>Auto-Update System</strong>: Integrated GitHub releases for seamless in-app updates.</li>
                                         <li><strong>Enhanced Detection</strong>: Database expanded to 150+ software brands.</li>
                                         <li><strong>Deep Scan Engine</strong>: Detects cracked software, broken signatures, and activation blocks.</li>
                                         <li><strong>Pro Export</strong>: Added full Metadata (Asset Tag, User, Location) to CSV reports.</li>
-                                        <li><strong>Smart UI</strong>: Added animated scanning indicators and pulsing effects.</li>
-                                        <li><strong>Sorting</strong>: Implemented multi-column sorting with "Action Required" priority.</li>
+                                        <li><strong>Premium UI</strong>: Implemented dark/light themes and modern glassmorphism aesthetic.</li>
+                                        <li><strong>Smart Sorting</strong>: Priority sorting for non-compliant software.</li>
                                     </ul>
                                 </section>
 
@@ -752,13 +924,21 @@ export default function App() {
                                     </ul>
                                 </section>
 
-                                <section style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                                    <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', color: 'var(--error)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Exclusive License Notice</h4>
+                                <section style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '8px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                                    <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Open Source License</h4>
                                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.5', margin: 0 }}>
-                                        This software is a <strong>proprietary asset of Charles Jasthyn C. De La Cueva</strong>. Partido State University is currently the only institution <strong>authorized to use and utilize</strong> this innovative system. Any unauthorized reproduction, distribution, modification, or selling of this application is strictly prohibited.
+                                        This software is now **Open Source** and released under the **MIT License**. It is provided as-is for the benefit of the community and educational institutions like **Partido State University**.
                                     </p>
                                     <div style={{ marginTop: '0.75rem', fontSize: '0.7rem', fontWeight: 600 }}>
-                                        © 2026 Charles Jasthyn C. De La Cueva. All Rights Reserved.
+                                        © 2026 Charles Jasthyn C. De La Cueva. Licensed under MIT.
+                                    </div>
+                                    <div style={{ marginTop: '0.75rem' }}>
+                                        <button
+                                            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.72rem', padding: '0.3rem 0.75rem', fontWeight: 600 }}
+                                            onClick={() => window.open('https://github.com/selrahcDC/cjsoftware-license-checker/releases', '_blank')}
+                                        >
+                                            🔗 View All Releases on GitHub
+                                        </button>
                                     </div>
                                 </section>
                             </div>
@@ -882,8 +1062,8 @@ export default function App() {
             </AnimatePresence>
 
             <footer style={{ marginTop: '1.5rem', textAlign: 'center', opacity: 0.4, fontSize: '0.65rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-                <div style={{ marginBottom: '0.25rem' }}>© 2026 Charles Jasthyn C. De La Cueva | All Rights Reserved</div>
-                <div>Authorized for use and utilization by: <strong>Partido State University</strong></div>
+                <div style={{ marginBottom: '0.25rem' }}>© 2026 Charles Jasthyn C. De La Cueva | Licensed under MIT</div>
+                <div>Open Source Software provided for community benefit and <strong>Partido State University</strong></div>
             </footer>
             {/* Interactive Onboarding Tour Overlay */}
             <AnimatePresence>
@@ -1008,6 +1188,7 @@ export default function App() {
                     </div>
                 )}
             </AnimatePresence>
+            <UpdateNotifier />
         </div>
     )
 }
