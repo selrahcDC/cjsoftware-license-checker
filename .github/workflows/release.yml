@@ -34,7 +34,7 @@ jobs:
           npm run build
           npx electron-builder --mac --x64 --arm64 -p always
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Build and Publish Windows
         if: matrix.os == 'windows-latest'
@@ -42,4 +42,4 @@ jobs:
           npm run build
           npx electron-builder --win --x64 --arm64 -p always
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -11,15 +11,22 @@ asar: true
 mac:
   icon: resources/icon.icns
   target:
+    - target: dmg
     - target: zip
   category: public.app-category.utilities
 win:
   icon: resources/icon.ico
   target:
+    - target: nsis
     - target: portable
 portable:
   artifactName: "${productName}-Portable-${version}.${ext}"
   unicode: true
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
 
 publish:
   - provider: github
