@@ -1,0 +1,27 @@
+appId: com.charlesjasthyn.cj-license-checker
+productName: CJSoftware License Checker
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+asar: true
+mac:
+  icon: resources/icon.icns
+  target:
+    - target: zip
+  category: public.app-category.utilities
+win:
+  icon: resources/icon.ico
+  target:
+    - target: portable
+portable:
+  artifactName: "${productName}-Portable-${version}.${ext}"
+  unicode: true
+
+publish:
+  - provider: github
+    owner: selrahcDC
+    repo: cjsoftware-license-checker

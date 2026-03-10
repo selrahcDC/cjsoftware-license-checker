@@ -1,0 +1,86 @@
+{
+    "photoshop": {
+        "name": "GIMP",
+        "url": "https://www.gimp.org/"
+    },
+    "illustrator": {
+        "name": "Inkscape",
+        "url": "https://inkscape.org/"
+    },
+    "indesign": {
+        "name": "Scribus",
+        "url": "https://www.scribus.net/"
+    },
+    "premiere": {
+        "name": "DaVinci Resolve / Kdenlive",
+        "url": "https://kdenlive.org/"
+    },
+    "after effects": {
+        "name": "Natron",
+        "url": "https://NatronGitHub.github.io/"
+    },
+    "lightroom": {
+        "name": "Darktable",
+        "url": "https://www.darktable.org/"
+    },
+    "microsoft office": {
+        "name": "LibreOffice",
+        "url": "https://www.libreoffice.org/"
+    },
+    "microsoft word": {
+        "name": "LibreOffice",
+        "url": "https://www.libreoffice.org/"
+    },
+    "microsoft excel": {
+        "name": "LibreOffice",
+        "url": "https://www.libreoffice.org/"
+    },
+    "microsoft powerpoint": {
+        "name": "LibreOffice",
+        "url": "https://www.libreoffice.org/"
+    },
+    "visio": {
+        "name": "Draw.io / Dia",
+        "url": "https://app.diagrams.net/"
+    },
+    "project": {
+        "name": "ProjectLibre",
+        "url": "https://www.projectlibre.com/"
+    },
+    "autocad": {
+        "name": "FreeCAD / LibreCAD",
+        "url": "https://www.freecadweb.org/"
+    },
+    "maya": {
+        "name": "Blender",
+        "url": "https://www.blender.org/"
+    },
+    "3ds max": {
+        "name": "Blender",
+        "url": "https://www.blender.org/"
+    },
+    "corel": {
+        "name": "Inkscape",
+        "url": "https://inkscape.org/"
+    },
+    "winrar": {
+        "name": "7-Zip",
+        "url": "https://www.7-zip.org/"
+    },
+    "winzip": {
+        "name": "7-Zip",
+        "url": "https://www.7-zip.org/"
+    },
+    "acrobat pro": {
+        "name": "PDFsam / Sumatra PDF",
+        "url": "https://pdfsam.org/"
+    },
+    "final cut pro": {
+        "name": "DaVinci Resolve",
+        "url": "https://www.blackmagicdesign.com/products/davinciresolve"
+    },
+    "logic pro": {
+        "name": "Audacity / LMMS",
+        "url": "https://lmms.io/"
+    }
+}
