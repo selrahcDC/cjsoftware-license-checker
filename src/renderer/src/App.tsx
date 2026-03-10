@@ -1188,7 +1188,6 @@ export default function App() {
                     </div>
                 )}
             </AnimatePresence>
-            <UpdateNotifier />
         </div>
     )
 }
@@ -1197,7 +1196,8 @@ declare global {
     interface Window {
         electron: {
             ipcRenderer: {
-                invoke: (channel: string, ...args: any[]) => Promise<any>
+                invoke: (channel: string, ...args: any[]) => Promise<any>,
+                onUpdateMessage: (callback: (message: any) => void) => () => void
             }
         }
     }
