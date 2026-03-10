@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { LayoutDashboard, Monitor, PlusCircle, Search, Save, Trash2, CheckCircle, ShieldCheck, XCircle, AlertCircle, RefreshCw, Smartphone, Download, ChevronUp, ChevronDown, ArrowUpAZ, History, List, Package, HelpCircle, BookOpen, ChevronRight, MonitorPlay, ArrowRight, Sun, Moon } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import UpdateNotifier from './components/UpdateNotifier'
 
 interface Device {
     id?: number
@@ -65,8 +64,9 @@ export default function App() {
 
         // Register the auto-updater message listener
         // The preload exposes onUpdateMessage which bridges the main process IPC to the renderer
-        if ((window as any).electron?.ipcRenderer?.onUpdateMessage) {
-            const unsubscribe = window.electron.ipcRenderer.onUpdateMessage((msg: any) => {
+        const renderer = (window as any).electron?.ipcRenderer
+        if (renderer?.onUpdateMessage) {
+            const unsubscribe = renderer.onUpdateMessage((msg: any) => {
                 switch (msg.type) {
                     case 'checking':     setUpdateStatus('checking'); break
                     case 'available':
