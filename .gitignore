@@ -54,4 +54,5 @@ client_secret.json
 
 # Internal project tools and documentation
 docs/GIT_POLICY.md
+docs/INTERNAL_RELEASE_TROUBLESHOOTING.md
 app-video-tutorial/
