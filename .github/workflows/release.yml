@@ -28,18 +28,33 @@ jobs:
       - name: Install Dependencies
         run: npm ci
         
-      - name: Build and Publish Mac
+      - name: Build Mac
         if: matrix.os == 'macos-latest'
         run: |
           npm run build
-          npx electron-builder --mac --x64 --arm64 -p always
+          npx electron-builder --mac --x64 --arm64 -p never
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Build and Publish Windows
+      - name: Build Windows
         if: matrix.os == 'windows-latest'
         run: |
           npm run build
-          npx electron-builder --win --x64 --arm64 -p always
+          npx electron-builder --win --x64 --arm64 -p never
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List files in dist
+        run: ls -R dist
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
