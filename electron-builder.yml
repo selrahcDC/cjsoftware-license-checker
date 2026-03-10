@@ -10,6 +10,7 @@ files:
 asar: true
 mac:
   icon: resources/icon.icns
+  identity: null
   target:
     - target: dmg
     - target: zip
