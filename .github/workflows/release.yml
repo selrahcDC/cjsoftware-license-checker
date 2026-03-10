@@ -53,8 +53,6 @@ jobs:
         with:
           files: |
             dist/*.dmg
-            dist/*.zip
             dist/*.exe
-            dist/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
