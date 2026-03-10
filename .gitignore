@@ -32,3 +32,22 @@ dist/
 out/
 release/
 build/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Sensitive Information (SECURITY)
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+credentials.json
+client_secret.json
+.aws/
+.gcp/
