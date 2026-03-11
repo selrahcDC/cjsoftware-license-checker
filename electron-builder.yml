@@ -22,14 +22,14 @@ win:
     - target: portable
 
 nsis:
-  artifactName: "CJSoftware-License-Checker-Setup.${ext}"
+  artifactName: "CJSoftware-License-Checker-Setup-${arch}.${ext}"
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
 
 portable:
-  artifactName: "CJSoftware-License-Checker-Portable.${ext}"
+  artifactName: "CJSoftware-License-Checker-Portable-${arch}.${ext}"
   unicode: true
 
 publish:

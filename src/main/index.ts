@@ -21,9 +21,11 @@ if (isWin) {
 // FIX: Global Error Handling to prevent silent exits
 process.on('uncaughtException', (error) => {
     console.error('CRITICAL ERROR:', error)
-    const { dialog } = require('electron')
-    if (app.isReady()) {
-        dialog.showErrorBox('System Error', `The application encountered a critical error: ${error.message}\n\nPlease try running as Administrator.`)
+    try {
+        const { dialog } = require('electron')
+        dialog.showErrorBox('System Error', `The application encountered a critical error: ${error.message}\n\nPlease try running as Administrator or contact support.`)
+    } catch (e) {
+        console.error('Failed to show error box:', e)
     }
 })
 
@@ -130,35 +132,44 @@ if (!gotTheLock) {
     })
 
     app.whenReady().then(() => {
-    // Initialize Database
-    const dbPath = path.join(app.getPath('userData'), 'cj_license_checker.db')
-    db = new Database(dbPath)
+        try {
+            // Initialize Database
+            const dbPath = path.join(app.getPath('userData'), 'cj_license_checker.db')
+            db = new Database(dbPath)
 
-    db.exec(`
-    CREATE TABLE IF NOT EXISTS devices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      asset_tag TEXT,
-      brand_model TEXT,
-      location TEXT,
-      assigned_user TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS software_inventory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      device_id INTEGER,
-      name TEXT,
-      version TEXT,
-      is_licensed INTEGER DEFAULT 0,
-      license_validity TEXT,
-      type TEXT,
-      license_required INTEGER DEFAULT 0,
-      compliance_note TEXT,
-      metadata TEXT,
-      path TEXT,
-      icon TEXT,
-      FOREIGN KEY(device_id) REFERENCES devices(id)
-    );
-  `)
+            db.exec(`
+            CREATE TABLE IF NOT EXISTS devices (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              asset_tag TEXT,
+              brand_model TEXT,
+              location TEXT,
+              assigned_user TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS software_inventory (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              device_id INTEGER,
+              name TEXT,
+              version TEXT,
+              is_licensed INTEGER DEFAULT 0,
+              license_validity TEXT,
+              type TEXT,
+              license_required INTEGER DEFAULT 0,
+              compliance_note TEXT,
+              metadata TEXT,
+              path TEXT,
+              icon TEXT,
+              FOREIGN KEY(device_id) REFERENCES devices(id)
+            );
+            `)
+        } catch (dbError: any) {
+            console.error('DATABASE ERROR:', dbError)
+            // Still create window so app doesn't look "dead"
+            setTimeout(() => {
+                const { dialog } = require('electron')
+                dialog.showErrorBox('Database Error', `Failed to initialize the local database: ${dbError.message}\n\nExisting audit logs may not be accessible.`)
+            }, 1000)
+        }
 
     // Migration for existing tables
     try {

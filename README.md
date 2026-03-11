@@ -22,8 +22,9 @@ Get the latest stable version for your operating system. These links always poin
 
 | Platform | Download Link | File Type |
 | :--- | :--- | :--- |
-| **🪟 Windows** | [**CJSoftware License Checker Setup**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-Setup.exe) | `.exe` (Installer) |
-| **🪟 Windows** | [**CJSoftware License Checker Portable**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-Portable.exe) | `.exe` (Click-and-Run) |
+| **🪟 Windows (x64)** | [**CJSoftware License Checker Setup**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-Setup-x64.exe) | `.exe` (Standard) |
+| **🪟 Windows (ARM64)** | [**CJSoftware License Checker Setup**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-Setup-arm64.exe) | `.exe` (Surface/ARM) |
+| **🪟 Windows** | [**CJSoftware License Checker Portable**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-Portable-x64.exe) | `.exe` (Portable) |
 | **🍎 macOS (Apple Silicon)** | [**CJSoftware License Checker DMG (arm64)**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-arm64.dmg) | `.dmg` (Apple Silicon) |
 | **🍎 macOS (Intel)** | [**CJSoftware License Checker DMG (x64)**](https://github.com/selrahcDC/cjsoftware-license-checker/releases/latest/download/CJSoftware-License-Checker-x64.dmg) | `.dmg` (Intel) |
 
