@@ -35,8 +35,6 @@ let mainWindow: BrowserWindow | null = null
 // Auto-updater configuration
 autoUpdater.autoDownload = false
 autoUpdater.logger = console
-// @ts-ignore
-autoUpdater.logger.transports.file.level = 'debug'
 autoUpdater.allowPrerelease = true
 
 const sendUpdateMessage = (type: string, data?: any) => {
