@@ -379,7 +379,7 @@ export default function App() {
                                         letterSpacing: '0.05em'
                                     }}
                                 >
-                                    V1.1.5
+                                    V1.1.6
                                 </span>
                         </div>
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
