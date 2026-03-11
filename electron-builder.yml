@@ -9,6 +9,7 @@ files:
   - package.json
 asar: true
 mac:
+  artifactName: "${productName}-${arch}.${ext}"
   icon: resources/icon.icns
   identity: null
   target:
@@ -19,14 +20,17 @@ win:
   target:
     - target: nsis
     - target: portable
-portable:
-  artifactName: "${productName}-Portable-${version}.${ext}"
-  unicode: true
+
 nsis:
+  artifactName: "${productName}-Setup.${ext}"
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: "${productName}-Portable.${ext}"
+  unicode: true
 
 publish:
   - provider: github
